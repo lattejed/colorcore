@@ -191,6 +191,40 @@ class Controller(object):
         return self.tx_parser((yield from self._process_transaction(transaction, mode)))
 
     @asyncio.coroutine
+    def sendasset_advanced(self,
+        address: "The address to send the asset from",
+        btcaddress: "The address to take fees from and send change to",
+        asset: "The asset ID identifying the asset to send",
+        amount: "The amount of asset units to send",
+        to: "The address to send the asset to",
+        fees: "The fess in satoshis for the transaction"=None,
+        mode: """'broadcast' (default) for signing and broadcasting the transaction,
+            'signed' for signing the transaction without broadcasting,
+            'unsigned' for getting the raw unsigned transaction without broadcasting"""='broadcast'
+    ):
+        """Creates a transaction for sending an asset from an address to another."""
+        from_address = self._as_any_address(address)
+        btc_address = self._as_any_address(btcaddress)
+        to_address = self._as_openassets_address(to)
+
+        builder = openassets.transactions.TransactionBuilder(self.configuration.dust_limit)
+        colored_outputs = yield from self._get_unspent_outputs(from_address)
+        btc_outputs = yield from self._get_unspent_outputs(btc_address)
+
+        asset_transfer_parameters = openassets.transactions.TransferParameters(
+            colored_outputs, to_address.to_scriptPubKey(), btc_address.to_scriptPubKey(), self._as_int(amount))
+
+        btc_transfer_parameters = openassets.transactions.TransferParameters(
+            btc_outputs, None, btc_address.to_scriptPubKey(), 0)
+
+        transaction = builder.transfer(
+            [(self.convert.base58_to_asset_id(asset), asset_transfer_parameters)], 
+            btc_transfer_parameters,
+            self._get_fees(fees))
+
+        return self.tx_parser((yield from self._process_transaction(transaction, mode, allow_partial_signing=True)))
+
+    @asyncio.coroutine
     def issueasset(self,
         address: "The address to issue the asset from",
         amount: "The amount of asset units to issue",
@@ -351,11 +385,11 @@ class Controller(object):
         return result
 
     @asyncio.coroutine
-    def _process_transaction(self, transaction, mode):
+    def _process_transaction(self, transaction, mode, allow_partial_signing=False):
         if mode == 'broadcast' or mode == 'signed':
             # Sign the transaction
             signed_transaction = yield from self.provider.sign_transaction(transaction)
-            if not signed_transaction['complete']:
+            if not allow_partial_signing and not signed_transaction['complete']:
                 raise colorcore.routing.ControllerError("Could not sign the transaction.")
 
             if mode == 'broadcast':

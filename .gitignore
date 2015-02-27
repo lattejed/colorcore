@@ -1,1 +1,4 @@
 config.ini
+cache.db
+*__pycache__
+*.swp
